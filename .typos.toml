@@ -1,0 +1,4 @@
+# Proper names cited in references that the spell checker would otherwise flag.
+[default.extend-words]
+Tung = "Tung"
+tung = "tung"
