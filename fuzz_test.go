@@ -13,10 +13,10 @@ import (
 // the filter.
 func buildFuzzModel(f0, f1, f2, f3, q0, q1, r0, h0, h1 float64) Model {
 	return Model{
-		F: FromRows([]float64{f0, f1}, []float64{f2, f3}),
-		Q: FromRows([]float64{q0*q0 + 1e-9, q0 * q1}, []float64{q0 * q1, q1*q1 + 1e-9}),
-		H: FromRows([]float64{h0, h1}),
-		R: FromRows([]float64{r0*r0 + 1e-9}),
+		F:   FromRows([]float64{f0, f1}, []float64{f2, f3}),
+		Q:   FromRows([]float64{q0*q0 + 1e-9, q0 * q1}, []float64{q0 * q1, q1*q1 + 1e-9}),
+		H:   FromRows([]float64{h0, h1}),
+		R:   FromRows([]float64{r0*r0 + 1e-9}),
 		Mu0: Vector{0, 0},
 		P0:  Diag(1, 1),
 	}
