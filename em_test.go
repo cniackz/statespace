@@ -193,3 +193,28 @@ func simulateScalar(rng *rand.Rand, m Model, t int) []Vector {
 	}
 	return zs
 }
+
+// TestEMRecoversTransition exercises the lag-one smoothed covariance across the
+// whole series: with Q, H, R and the prior fixed, EM recovers the transition f
+// from a wrong start. A wrong lag-one recursion biases f, so this pins it.
+func TestEMRecoversTransition(t *testing.T) {
+	rng := rand.New(rand.NewSource(808))
+	const fTrue, qTrue, rTrue = 0.7, 0.3, 1.0
+	truth := Model{
+		F: FromRows([]float64{fTrue}), Q: FromRows([]float64{qTrue}),
+		H: FromRows([]float64{1}), R: FromRows([]float64{rTrue}),
+		Mu0: Vector{0}, P0: FromRows([]float64{qTrue / (1 - fTrue*fTrue)}),
+	}
+	zs := simulateScalar(rng, truth, 20000)
+	init := cloneModel(truth)
+	init.F = FromRows([]float64{0.1})
+	res, err := Learn(zs, init, WithFixed("Q", "H", "R", "Mu0", "P0"), WithMaxIterations(1000), WithTolerance(1e-10))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fRec := res.Model.F.At(0, 0)
+	if d := math.Abs(fRec-fTrue) / fTrue; d > 0.1 {
+		t.Fatalf("F recovered %g, want ~%g (rel err %g)", fRec, fTrue, d)
+	}
+	t.Logf("F %.4f (want %g), iters %d", fRec, fTrue, res.Iters)
+}
