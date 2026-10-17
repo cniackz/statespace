@@ -62,6 +62,11 @@ func WithFixed(names ...string) EMOption {
 // absorbs; the likelihood, not the individual matrices, is what EM maximizes.
 // References: Dempster, Laird and Rubin 1977; Shumway and Stoffer 1982;
 // Ghahramani and Hinton 1996.
+//
+// Learn does not estimate a control model: a model with a B is rejected with an
+// error wrapping ErrInvalidModel. It validates the model it is about to return
+// and reports an error wrapping ErrNotFinite if a divergent fit left it invalid,
+// so it never returns a non-finite model with a nil error.
 func Learn(zs []Vector, init Model, opts ...EMOption) (EMResult, error) {
 	cfg := emConfig{maxIter: 100, tol: 1e-6, fixed: map[string]bool{}}
 	for _, o := range opts {
@@ -72,6 +77,9 @@ func Learn(zs []Vector, init Model, opts ...EMOption) (EMResult, error) {
 	}
 	if err := init.Validate(); err != nil {
 		return EMResult{}, err
+	}
+	if init.hasControl() {
+		return EMResult{}, fmt.Errorf("%w: Learn does not estimate control models; remove B (Filter and Smooth do take control inputs)", ErrInvalidModel)
 	}
 	cur := cloneModel(init)
 	var trace []float64
@@ -96,6 +104,12 @@ func Learn(zs []Vector, init Model, opts ...EMOption) (EMResult, error) {
 			}
 		}
 		cur = mStep(cur, zs, sm, cfg.fixed)
+	}
+	// The last M-step runs after the last likelihood evaluation, so validate the
+	// model before returning it: a divergent fit (from extreme observations, say)
+	// must surface as an error, never as a non-finite model with a nil error.
+	if err := cur.Validate(); err != nil {
+		return EMResult{}, fmt.Errorf("%w: EM did not reach a valid model (%v)", ErrNotFinite, err)
 	}
 	return EMResult{Model: cur, LogLik: trace, Iters: iters, Converged: converged}, nil
 }

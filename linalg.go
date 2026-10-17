@@ -306,13 +306,27 @@ func thorntonUpdate(u Matrix, d Vector, f, uq Matrix, dq Vector) (Matrix, Vector
 	return uOut, dOut
 }
 
-// minEigSym returns the smallest eigenvalue of a symmetric matrix by the cyclic
-// Jacobi method. It is used only to test a caller matrix for positive
-// semidefiniteness; the filter itself never calls it. n is moderate, and Jacobi
-// is reliable for small symmetric matrices.
-func minEigSym(m Matrix) float64 {
+// jacobiEigSym returns the eigenvalues and eigenvectors of a symmetric matrix by
+// the cyclic Jacobi method. The k-th eigenvector is column k of the returned
+// matrix, so m = V diag(eig) V^T. The matrix is normalized by its largest
+// absolute entry before the sweeps, which makes the convergence cutoff relative
+// to the scale of the matrix: a matrix whose entries are all near 1e-16 is
+// rotated as thoroughly as one near 1, and its eigenvalues are not read off a
+// diagonal that was never touched. n is moderate, and Jacobi is reliable for
+// small symmetric matrices.
+func jacobiEigSym(m Matrix) (Vector, Matrix) {
 	n := m.rows
-	a := m.clone()
+	var scale float64
+	for _, v := range m.data {
+		if a := math.Abs(v); a > scale {
+			scale = a
+		}
+	}
+	if scale == 0 {
+		return make(Vector, n), Ident(n)
+	}
+	a := scaleMat(m, 1/scale)
+	v := Ident(n)
 	for sweep := 0; sweep < 100; sweep++ {
 		var off float64
 		for p := 0; p < n; p++ {
@@ -329,9 +343,7 @@ func minEigSym(m Matrix) float64 {
 				if apq == 0 {
 					continue
 				}
-				app := a.At(p, p)
-				aqq := a.At(qq, qq)
-				theta := (aqq - app) / (2 * apq)
+				theta := (a.At(qq, qq) - a.At(p, p)) / (2 * apq)
 				t := sign(theta) / (math.Abs(theta) + math.Sqrt(theta*theta+1))
 				if theta == 0 {
 					t = 1
@@ -350,16 +362,81 @@ func minEigSym(m Matrix) float64 {
 					a.set(p, i, c*api-s*aqi)
 					a.set(qq, i, s*api+c*aqi)
 				}
+				for i := 0; i < n; i++ {
+					vip := v.At(i, p)
+					viq := v.At(i, qq)
+					v.set(i, p, c*vip-s*viq)
+					v.set(i, qq, s*vip+c*viq)
+				}
 			}
 		}
 	}
-	minv := a.At(0, 0)
-	for i := 1; i < n; i++ {
-		if a.At(i, i) < minv {
-			minv = a.At(i, i)
+	eig := make(Vector, n)
+	for i := 0; i < n; i++ {
+		eig[i] = a.At(i, i) * scale
+	}
+	return eig, v
+}
+
+// eigExtremesSym returns the smallest eigenvalue and the largest absolute
+// eigenvalue of a symmetric matrix. The pair lets a positive-semidefinite test
+// use a tolerance relative to the scale of the matrix, which is the whole point:
+// an absolute floor would accept a matrix whose indefiniteness is small only
+// because the matrix itself is small.
+func eigExtremesSym(m Matrix) (minEig, maxAbs float64) {
+	eig, _ := jacobiEigSym(m)
+	minEig = eig[0]
+	maxAbs = math.Abs(eig[0])
+	for _, e := range eig[1:] {
+		if e < minEig {
+			minEig = e
+		}
+		if a := math.Abs(e); a > maxAbs {
+			maxAbs = a
 		}
 	}
-	return minv
+	return minEig, maxAbs
+}
+
+// minEigSym returns the smallest eigenvalue of a symmetric matrix.
+func minEigSym(m Matrix) float64 {
+	mn, _ := eigExtremesSym(m)
+	return mn
+}
+
+// pseudoInverseSym returns the Moore-Penrose pseudo-inverse of a symmetric
+// matrix, inverting only the eigen-directions whose eigenvalue magnitude exceeds
+// reltol times the largest. A direction with zero variance (a deterministic
+// state component) is left at zero, so the smoother applies no correction along
+// it instead of failing on a singular predicted covariance. For a
+// positive-definite matrix this equals the ordinary inverse.
+func pseudoInverseSym(m Matrix, reltol float64) Matrix {
+	eig, v := jacobiEigSym(m)
+	n := len(eig)
+	var maxAbs float64
+	for _, e := range eig {
+		if a := math.Abs(e); a > maxAbs {
+			maxAbs = a
+		}
+	}
+	cutoff := reltol * maxAbs
+	d := make(Vector, n)
+	for i, e := range eig {
+		if math.Abs(e) > cutoff {
+			d[i] = 1 / e
+		}
+	}
+	out := Zeros(n, n)
+	for i := 0; i < n; i++ {
+		for j := 0; j < n; j++ {
+			var s float64
+			for k := 0; k < n; k++ {
+				s += v.At(i, k) * d[k] * v.At(j, k)
+			}
+			out.set(i, j, s)
+		}
+	}
+	return out
 }
 
 func sign(x float64) float64 {

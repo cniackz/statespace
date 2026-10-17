@@ -108,3 +108,30 @@ func FuzzFilter(f *testing.F) {
 		}
 	})
 }
+
+// FuzzLearn drives EM with fuzzed model entries and observations. The invariant,
+// the one H4 of the non-author attack broke: Learn never returns a model with a
+// nil error unless that model passes Validate. It also must not panic.
+func FuzzLearn(f *testing.F) {
+	f.Add(0.9, 0.1, 1.0, 1.0, 0.5, 0.7, 1.3, -0.4)
+	f.Add(1.0, 1e300, 1.0, 1e300, 3e153, -3e153, 3e153, 3e153)
+	f.Add(math.NaN(), 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0)
+	f.Fuzz(func(t *testing.T, f0, q0, h0, r0, z0, z1, z2, z3 float64) {
+		init := Model{
+			F: FromRows([]float64{f0}), Q: FromRows([]float64{q0*q0 + 1e-9}),
+			H: FromRows([]float64{h0}), R: FromRows([]float64{r0*r0 + 1e-9}),
+			Mu0: Vector{0}, P0: FromRows([]float64{1}),
+		}
+		if err := init.Validate(); err != nil {
+			return
+		}
+		zs := []Vector{{z0}, {z1}, nil, {z2}, {z3}}
+		res, err := Learn(zs, init, WithMaxIterations(5))
+		if err != nil {
+			return
+		}
+		if verr := res.Model.Validate(); verr != nil {
+			t.Fatalf("Learn returned nil error with an invalid model: %v", verr)
+		}
+	})
+}

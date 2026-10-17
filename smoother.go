@@ -1,6 +1,11 @@
 package statespace
 
-import "fmt"
+// smootherRcond is the relative eigenvalue floor for the pseudo-inverse of the
+// one-step predicted covariance in the smoother. A direction with variance below
+// this fraction of the largest is treated as deterministic and gets no smoothing
+// correction, so a model with a deterministic state component (a singular
+// predicted covariance) is smoothed instead of rejected.
+const smootherRcond = 1e-12
 
 // SmoothResult holds the fixed-interval smoothed estimate x_k|T at every step,
 // the total log-likelihood of the observations, and the lag-one smoothed
@@ -14,8 +19,11 @@ type SmoothResult struct {
 
 // Smooth runs the forward filter and the Rauch-Tung-Striebel backward recursion,
 // returning the smoothed estimate at every step. us is nil or one control input
-// per step, as in Filter. References: Rauch, Tung and Striebel 1965; Anderson
-// and Moore 1979; Shumway and Stoffer 1982 for the lag-one covariance.
+// per step, as in Filter. A deterministic state direction (a one-step predicted
+// covariance that is singular, from a rank-deficient Q) gets no smoothing
+// correction rather than an error, through a pseudo-inverse of the predicted
+// covariance. References: Rauch, Tung and Striebel 1965; Anderson and Moore
+// 1979; Shumway and Stoffer 1982 for the lag-one covariance.
 func (m Model) Smooth(zs []Vector, us []Vector) (SmoothResult, error) {
 	fs, err := m.runFilter(zs, us)
 	if err != nil {
@@ -36,10 +44,7 @@ func (m Model) smoothFrom(fs filterState, zs []Vector) (SmoothResult, error) {
 	sx[t-1] = fs.filtX[t-1]
 	sp[t-1] = fs.filtP[t-1]
 	for k := t - 2; k >= 0; k-- {
-		predInv, ok := matInv(fs.predP[k+1])
-		if !ok {
-			return SmoothResult{}, fmt.Errorf("%w: singular predicted covariance at step %d", ErrNotFinite, k+1)
-		}
+		predInv := pseudoInverseSym(fs.predP[k+1], smootherRcond)
 		j := matMul(matMul(fs.filtP[k], ft), predInv)
 		gains[k] = j
 		dx := make(Vector, n)
@@ -61,10 +66,7 @@ func (m Model) smoothFrom(fs filterState, zs []Vector) (SmoothResult, error) {
 		// Lag-one initialization: P_{t-1,t-2|T} = (I - K H) F P_{t-2|t-2}, with
 		// (I - K H) = P_{t-1|t-1} (P_{t-1|t-2})^{-1}, which holds whether or not
 		// the last step carried an observation (Ghahramani and Hinton 1996).
-		predInv, ok := matInv(fs.predP[t-1])
-		if !ok {
-			return SmoothResult{}, fmt.Errorf("%w: singular predicted covariance at step %d", ErrNotFinite, t-1)
-		}
+		predInv := pseudoInverseSym(fs.predP[t-1], smootherRcond)
 		ikh := matMul(fs.filtP[t-1], predInv)
 		lag[t-1] = matMul(matMul(ikh, m.F), fs.filtP[t-2])
 		// lag[o] = filtP[o] J_{o-1}^T + J_o (lag[o+1] - F filtP[o]) J_{o-1}^T,

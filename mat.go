@@ -123,15 +123,24 @@ func (m Matrix) isFinite() bool {
 // isSquare reports whether the matrix is square.
 func (m Matrix) isSquare() bool { return m.rows == m.cols }
 
-// isSymmetric reports whether the matrix is square and symmetric within tol.
+// isSymmetric reports whether the matrix is square and symmetric within a
+// tolerance relative to its scale. The scale is the largest absolute entry, so a
+// matrix whose entries are all tiny is still held to a relative tolerance: an
+// absolute floor would call a matrix symmetric only because it is small.
 func (m Matrix) isSymmetric(tol float64) bool {
 	if !m.isSquare() {
 		return false
 	}
+	var scale float64
+	for _, v := range m.data {
+		if a := math.Abs(v); a > scale {
+			scale = a
+		}
+	}
 	for i := 0; i < m.rows; i++ {
 		for j := i + 1; j < m.cols; j++ {
 			d := m.At(i, j) - m.At(j, i)
-			if math.Abs(d) > tol*(1+math.Abs(m.At(i, j))) {
+			if math.Abs(d) > tol*scale {
 				return false
 			}
 		}

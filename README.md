@@ -106,6 +106,8 @@ validate-before-commit guarantee.
   known H) to pin the rest.
 - A partial gap is requested explicitly with a mask (`UpdateMasked`); a NaN in an
   observation that is not a declared gap is invalid input, not a gap.
+- `Learn` does not estimate a control model (`B`); `Filter` and `Smooth` do take
+  control inputs.
 - The types are not safe for concurrent use without external locking.
 
 ## License

@@ -127,11 +127,11 @@ func (m Model) Validate() error {
 	if !m.P0.isSymmetric(symTol) {
 		return fmt.Errorf("%w: P0 is not symmetric", ErrInvalidModel)
 	}
-	if e := minEigSym(m.Q); e < -psdTol*(1+matScale(m.Q)) {
-		return fmt.Errorf("%w: Q is not positive semidefinite (min eigenvalue %g)", ErrInvalidModel, e)
+	if mn, mx := eigExtremesSym(m.Q); mn < -psdTol*mx {
+		return fmt.Errorf("%w: Q is not positive semidefinite (min eigenvalue %g, scale %g)", ErrInvalidModel, mn, mx)
 	}
-	if e := minEigSym(m.P0); e < -psdTol*(1+matScale(m.P0)) {
-		return fmt.Errorf("%w: P0 is not positive semidefinite (min eigenvalue %g)", ErrInvalidModel, e)
+	if mn, mx := eigExtremesSym(m.P0); mn < -psdTol*mx {
+		return fmt.Errorf("%w: P0 is not positive semidefinite (min eigenvalue %g, scale %g)", ErrInvalidModel, mn, mx)
 	}
 	if _, ok := choleskyLower(m.R); !ok {
 		return fmt.Errorf("%w: R is not positive definite", ErrInvalidModel)

@@ -141,3 +141,85 @@ func TestFilterMatchesOnlineKF(t *testing.T) {
 		t.Fatalf("loglik batch %g vs online %g", res.LogLikelihood, ll)
 	}
 }
+
+// The tests below lock in the robustness findings of the non-author attack:
+// scale-relative tolerances in Validate, a scale-invariant eigenvalue, a
+// validated Learn result, and a smoother that survives a deterministic state.
+
+// TestValidateRejectsSmallIndefinite: a Q (and a P0) indefinite at a tiny scale
+// must be rejected, not accepted because the scale is below the old absolute
+// floor.
+func TestValidateRejectsSmallIndefinite(t *testing.T) {
+	q := FromRows([]float64{1e-12, 1e-10}, []float64{1e-10, 1e-12}) // eigenvalues ~ +1e-10, -1e-10
+	m := goodModel()
+	m.Q = q
+	m.R = Diag(1e-8)
+	if err := m.Validate(); err == nil {
+		t.Fatal("small indefinite Q accepted")
+	}
+	m = goodModel()
+	m.P0 = q
+	if err := m.Validate(); err == nil {
+		t.Fatal("small indefinite P0 accepted")
+	}
+}
+
+// TestValidateRejectsSmallAsymmetric: a small asymmetry must be caught relative
+// to the matrix scale.
+func TestValidateRejectsSmallAsymmetric(t *testing.T) {
+	m := goodModel()
+	m.Q = FromRows([]float64{1e-8, 5e-10}, []float64{0, 1e-8})
+	if err := m.Validate(); err == nil {
+		t.Fatal("small asymmetric Q accepted")
+	}
+}
+
+// TestMinEigScaleInvariant: the eigenvalue routine sees indefiniteness at any
+// scale, not only above an absolute cutoff.
+func TestMinEigScaleInvariant(t *testing.T) {
+	a := FromRows([]float64{1e-17, 1e-16}, []float64{1e-16, 1e-17}) // eigenvalues 1.1e-16, -9e-17
+	if e := minEigSym(a); e >= 0 {
+		t.Fatalf("minEigSym %g, want negative for a tiny-scale indefinite matrix", e)
+	}
+}
+
+// TestLearnValidatesResult: a divergent fit must surface as an error, never as a
+// non-finite model with a nil error.
+func TestLearnValidatesResult(t *testing.T) {
+	zs := make([]Vector, 50)
+	for k := range zs {
+		zs[k] = Vector{3e153 * (1 + 0.01*float64(k%7))}
+	}
+	init := Model{F: Diag(1), Q: Diag(1e300), H: Diag(1), R: Diag(1e300), Mu0: Vector{3e153}, P0: Diag(1e300)}
+	res, err := Learn(zs, init, WithMaxIterations(1))
+	if err == nil {
+		if verr := res.Model.Validate(); verr != nil {
+			t.Fatalf("Learn returned nil error with an invalid model: %v", verr)
+		}
+	}
+}
+
+// TestLearnRejectsControl: a model with B is rejected with a clear error wrapping
+// ErrInvalidModel.
+func TestLearnRejectsControl(t *testing.T) {
+	init := Model{F: Diag(0.9), Q: Diag(0.1), H: Diag(1), R: Diag(1), Mu0: Vector{0}, P0: Diag(1), B: Diag(1)}
+	_, err := Learn([]Vector{{1}, {2}, {3}}, init)
+	if !errorsIsInvalidModel(err) {
+		t.Fatalf("Learn with B: got %v, want ErrInvalidModel", err)
+	}
+}
+
+// TestSmoothDeterministicState: a model with a deterministic state component
+// (singular predicted covariance) smooths without error.
+func TestSmoothDeterministicState(t *testing.T) {
+	m := Model{F: Ident(2), Q: Diag(0, 0.1), H: FromRows([]float64{1, 1}), R: Diag(1), Mu0: Vector{1, 0}, P0: Diag(0, 1)}
+	if err := m.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	zs := []Vector{{1}, {1.2}, {0.9}, {1.1}}
+	if _, err := m.Smooth(zs, nil); err != nil {
+		t.Fatalf("Smooth on a deterministic state: %v", err)
+	}
+}
+
+func errorsIsInvalidModel(err error) bool { return errors.Is(err, ErrInvalidModel) }
