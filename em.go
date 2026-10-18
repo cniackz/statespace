@@ -6,10 +6,10 @@ import "fmt"
 // start of each iteration (non-decreasing), the number of iterations run, and
 // whether the log-likelihood increase fell below the tolerance.
 type EMResult struct {
-	Model     Model
-	LogLik    []float64
-	Iters     int
-	Converged bool
+	Model          Model
+	LogLikelihoods []float64
+	Iters          int
+	Converged      bool
 }
 
 // EMOption configures Learn.
@@ -111,7 +111,7 @@ func Learn(zs []Vector, init Model, opts ...EMOption) (EMResult, error) {
 	if err := cur.Validate(); err != nil {
 		return EMResult{}, fmt.Errorf("%w: EM did not reach a valid model (%v)", ErrNotFinite, err)
 	}
-	return EMResult{Model: cur, LogLik: trace, Iters: iters, Converged: converged}, nil
+	return EMResult{Model: cur, LogLikelihoods: trace, Iters: iters, Converged: converged}, nil
 }
 
 // mStep returns the model that maximizes the expected complete-data

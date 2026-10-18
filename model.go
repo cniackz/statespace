@@ -64,14 +64,6 @@ func (m Model) stateDim() int { return m.F.rows }
 // obsDim returns the measurement dimension.
 func (m Model) obsDim() int { return m.H.rows }
 
-// ctrlDim returns the control dimension, or 0 when there is no B.
-func (m Model) ctrlDim() int {
-	if m.B.rows == 0 {
-		return 0
-	}
-	return m.B.cols
-}
-
 // hasControl reports whether the model has a control-input matrix.
 func (m Model) hasControl() bool { return m.B.rows != 0 }
 

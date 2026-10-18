@@ -128,9 +128,9 @@ func TestEMMonotone(t *testing.T) {
 		if err != nil {
 			t.Fatalf("trial %d: %v", trial, err)
 		}
-		for i := 1; i < len(res.LogLik); i++ {
-			if res.LogLik[i] < res.LogLik[i-1]-1e-6*(1+math.Abs(res.LogLik[i-1])) {
-				t.Fatalf("trial %d: loglik dropped at iter %d: %g -> %g", trial, i, res.LogLik[i-1], res.LogLik[i])
+		for i := 1; i < len(res.LogLikelihoods); i++ {
+			if res.LogLikelihoods[i] < res.LogLikelihoods[i-1]-1e-6*(1+math.Abs(res.LogLikelihoods[i-1])) {
+				t.Fatalf("trial %d: log-likelihood dropped at iter %d: %g -> %g", trial, i, res.LogLikelihoods[i-1], res.LogLikelihoods[i])
 			}
 		}
 	}
