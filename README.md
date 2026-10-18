@@ -82,8 +82,8 @@ Measured with `go test`:
 |---|---|---|
 | `KF.Predict` | about 0.6 us | 6 |
 | `KF.Update` | about 0.8 us | 10 |
-| `Filter` (100 steps) | about 215 us | 2017 |
-| `Smooth` (100 steps) | about 265 us | 3802 |
+| `Filter` (100 steps) | about 215 us | 2035 |
+| `Smooth` (100 steps) | about 280 us | 3920 |
 
 The library is dense and O(n^3) per step in the state dimension n, O(T n^3) over
 a series of length T, and is meant for moderate n. The online step is not

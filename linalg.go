@@ -325,7 +325,14 @@ func jacobiEigSym(m Matrix) (Vector, Matrix) {
 	if scale == 0 {
 		return make(Vector, n), Ident(n)
 	}
-	a := scaleMat(m, 1/scale)
+	// Normalize by a power of two taken from the largest entry, with Frexp and
+	// Ldexp, so the scaling is exact and never overflows: 1/scale would be Inf
+	// for a subnormal scale and poison the sweeps with NaN.
+	_, exp := math.Frexp(scale)
+	a := Zeros(n, n)
+	for i := range m.data {
+		a.data[i] = math.Ldexp(m.data[i], -exp)
+	}
 	v := Ident(n)
 	for sweep := 0; sweep < 100; sweep++ {
 		var off float64
@@ -373,7 +380,7 @@ func jacobiEigSym(m Matrix) (Vector, Matrix) {
 	}
 	eig := make(Vector, n)
 	for i := 0; i < n; i++ {
-		eig[i] = a.At(i, i) * scale
+		eig[i] = math.Ldexp(a.At(i, i), exp)
 	}
 	return eig, v
 }
@@ -434,6 +441,50 @@ func pseudoInverseSym(m Matrix, reltol float64) Matrix {
 				s += v.At(i, k) * d[k] * v.At(j, k)
 			}
 			out.set(i, j, s)
+		}
+	}
+	return out
+}
+
+// correlationPseudoInverse returns a pseudo-inverse of a symmetric
+// positive-semidefinite matrix, scaled by the diagonal so the cutoff is relative
+// to each component's own variance. It forms the correlation matrix
+// D^-1/2 m D^-1/2, whose eigenvalues are near one, pseudo-inverts that with the
+// cutoff reltol, and scales back. A small-but-real variance (a near-unit
+// correlation eigenvalue) is kept, where a cutoff on the raw matrix would drop
+// it as if it were zero; a direction with zero variance (a deterministic state
+// component, an infinite scale) is dropped and gets no inverse, as does a
+// collinear direction (a correlation eigenvalue below the cutoff).
+func correlationPseudoInverse(m Matrix, reltol float64) Matrix {
+	n := m.rows
+	scale := make([]float64, n)
+	for i := 0; i < n; i++ {
+		s := 1 / math.Sqrt(m.At(i, i))
+		if m.At(i, i) > 0 && !math.IsInf(s, 0) && !math.IsNaN(s) {
+			scale[i] = s
+		}
+	}
+	c := Ident(n)
+	for i := 0; i < n; i++ {
+		for j := i + 1; j < n; j++ {
+			if scale[i] != 0 && scale[j] != 0 {
+				r := m.At(i, j) * scale[i] * scale[j]
+				c.set(i, j, r)
+				c.set(j, i, r)
+			}
+		}
+	}
+	cPinv := pseudoInverseSym(c, reltol)
+	out := Zeros(n, n)
+	for i := 0; i < n; i++ {
+		if scale[i] == 0 {
+			continue
+		}
+		for j := 0; j < n; j++ {
+			if scale[j] == 0 {
+				continue
+			}
+			out.set(i, j, scale[i]*cPinv.At(i, j)*scale[j])
 		}
 	}
 	return out

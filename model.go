@@ -3,6 +3,7 @@ package statespace
 import (
 	"errors"
 	"fmt"
+	"math"
 )
 
 // symTol is the relative tolerance for the symmetry check on Q, R and P0, and
@@ -118,23 +119,101 @@ func (m Model) Validate() error {
 	if !vfinite(m.Mu0) {
 		return fmt.Errorf("%w: Mu0 has a non-finite entry", ErrInvalidModel)
 	}
-	if !m.Q.isSymmetric(symTol) {
-		return fmt.Errorf("%w: Q is not symmetric", ErrInvalidModel)
+	if err := covProblem(m.Q, "Q", false); err != nil {
+		return err
 	}
-	if !m.R.isSymmetric(symTol) {
-		return fmt.Errorf("%w: R is not symmetric", ErrInvalidModel)
+	if err := covProblem(m.R, "R", true); err != nil {
+		return err
 	}
-	if !m.P0.isSymmetric(symTol) {
-		return fmt.Errorf("%w: P0 is not symmetric", ErrInvalidModel)
+	if err := covProblem(m.P0, "P0", false); err != nil {
+		return err
 	}
-	if mn, mx := eigExtremesSym(m.Q); mn < -psdTol*mx {
-		return fmt.Errorf("%w: Q is not positive semidefinite (min eigenvalue %g, scale %g)", ErrInvalidModel, mn, mx)
+	return nil
+}
+
+// covProblem checks that a covariance matrix is symmetric and positive
+// semidefinite (positive definite when requirePD), with every test relative to
+// the scale of each component rather than to a single global magnitude. It works
+// on the correlation matrix D^-1/2 m D^-1/2: a small indefinite or asymmetric
+// block next to a large one stays visible, where a tolerance tied to the largest
+// entry would hide it (the entries of a correlation matrix are near one). It
+// returns an error wrapping ErrInvalidModel, naming the matrix, or nil.
+func covProblem(m Matrix, name string, requirePD bool) error {
+	n := m.rows
+	var dmax float64
+	for i := 0; i < n; i++ {
+		d := m.At(i, i)
+		if math.IsNaN(d) || math.IsInf(d, 0) {
+			return fmt.Errorf("%w: %s has a non-finite diagonal entry", ErrInvalidModel, name)
+		}
+		if a := math.Abs(d); a > dmax {
+			dmax = a
+		}
 	}
-	if mn, mx := eigExtremesSym(m.P0); mn < -psdTol*mx {
-		return fmt.Errorf("%w: P0 is not positive semidefinite (min eigenvalue %g, scale %g)", ErrInvalidModel, mn, mx)
+	if dmax == 0 {
+		if requirePD {
+			return fmt.Errorf("%w: %s is not positive definite (zero diagonal)", ErrInvalidModel, name)
+		}
+		for _, v := range m.data {
+			if v != 0 {
+				return fmt.Errorf("%w: %s has a zero diagonal but a non-zero entry, not positive semidefinite", ErrInvalidModel, name)
+			}
+		}
+		return nil
 	}
-	if _, ok := choleskyLower(m.R); !ok {
-		return fmt.Errorf("%w: R is not positive definite", ErrInvalidModel)
+	// A positive-(semi)definite matrix has a non-negative diagonal. A component
+	// has usable variance when 1/sqrt of its diagonal is finite; a zero or
+	// subnormal diagonal is a deterministic (zero-variance) direction, which a
+	// positive-definite matrix cannot have. The per-component factor 1/sqrt(d_i)
+	// scales the correlation and the symmetry test without ever forming the
+	// product d_i*d_j, which would overflow or underflow at extreme scales.
+	scale := make([]float64, n)
+	for i := 0; i < n; i++ {
+		d := m.At(i, i)
+		if d < -psdTol*dmax {
+			return fmt.Errorf("%w: %s has a negative diagonal entry, not positive semidefinite", ErrInvalidModel, name)
+		}
+		if s := 1 / math.Sqrt(d); d > 0 && !math.IsInf(s, 0) && !math.IsNaN(s) {
+			scale[i] = s
+		} else if requirePD {
+			return fmt.Errorf("%w: %s is not positive definite (a diagonal entry is zero)", ErrInvalidModel, name)
+		}
+	}
+	// Build the correlation matrix and check symmetry on its scale. A row whose
+	// variance is zero must have zero covariance, or the matrix is not PSD.
+	c := Ident(n)
+	for i := 0; i < n; i++ {
+		for j := i + 1; j < n; j++ {
+			if scale[i] != 0 && scale[j] != 0 {
+				if math.Abs(m.At(i, j)-m.At(j, i))*scale[i]*scale[j] > symTol {
+					return fmt.Errorf("%w: %s is not symmetric", ErrInvalidModel, name)
+				}
+				r := m.At(i, j) * scale[i] * scale[j]
+				c.set(i, j, r)
+				c.set(j, i, r)
+			} else {
+				if math.Abs(m.At(i, j)-m.At(j, i)) > symTol*dmax {
+					return fmt.Errorf("%w: %s is not symmetric", ErrInvalidModel, name)
+				}
+				if math.Abs(m.At(i, j)) > psdTol*dmax || math.Abs(m.At(j, i)) > psdTol*dmax {
+					return fmt.Errorf("%w: %s has a zero-variance component with non-zero covariance, not positive semidefinite", ErrInvalidModel, name)
+				}
+			}
+		}
+	}
+	mn, mx := eigExtremesSym(c)
+	if math.IsNaN(mn) || math.IsInf(mn, 0) {
+		return fmt.Errorf("%w: %s has a non-finite eigenvalue", ErrInvalidModel, name)
+	}
+	floor := mx
+	if floor < 1 {
+		floor = 1
+	}
+	if mn < -psdTol*floor {
+		return fmt.Errorf("%w: %s is not positive semidefinite (correlation min eigenvalue %g)", ErrInvalidModel, name, mn)
+	}
+	if requirePD && mn <= psdTol*floor {
+		return fmt.Errorf("%w: %s is not positive definite (correlation min eigenvalue %g)", ErrInvalidModel, name, mn)
 	}
 	return nil
 }
