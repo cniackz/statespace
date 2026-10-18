@@ -95,3 +95,33 @@ func TestValidateAcceptsIllConditioned(t *testing.T) {
 		t.Errorf("ill-conditioned but valid model rejected: %v", err)
 	}
 }
+
+// TestInvertPredictedOffAxisSingular covers the smoother inverse on a singular
+// predicted covariance whose null direction is not a coordinate axis (a
+// rank-deficient Q in a rotated basis). The ordinary inverse returns a finite
+// but wrong matrix there, which only the residual check rejects, so this is what
+// makes that check load-bearing. The pseudo-inverse must satisfy the reflexive
+// identity P inv P = P, which the wrong ordinary inverse does not.
+func TestInvertPredictedOffAxisSingular(t *testing.T) {
+	pp := FromRows([]float64{1e8, 1e4}, []float64{1e4, 1}) // singular: 1e8*1 = (1e4)^2
+	inv := invertPredicted(pp)
+	for _, v := range inv.data {
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			t.Fatalf("non-finite inverse: %v", inv.data)
+		}
+	}
+	back := matMul(matMul(pp, inv), pp)
+	var scale float64
+	for _, v := range pp.data {
+		if a := math.Abs(v); a > scale {
+			scale = a
+		}
+	}
+	for i := 0; i < 2; i++ {
+		for j := 0; j < 2; j++ {
+			if d := math.Abs(back.At(i, j) - pp.At(i, j)); d > 1e-6*scale {
+				t.Errorf("P inv P != P at [%d][%d]: %g vs %g", i, j, back.At(i, j), pp.At(i, j))
+			}
+		}
+	}
+}
