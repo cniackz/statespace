@@ -64,8 +64,12 @@ type SmoothResult struct {
 // per step, as in Filter. A deterministic state direction (a one-step predicted
 // covariance that is singular, from a rank-deficient Q) gets no smoothing
 // correction rather than an error, through a pseudo-inverse of the predicted
-// covariance. References: Rauch, Tung and Striebel 1965; Anderson and Moore
-// 1979; Shumway and Stoffer 1982 for the lag-one covariance.
+// covariance. A degenerate model that passes Validate but cannot be run in
+// double precision, such as a variance near the overflow limit or a subnormal
+// variance whose reciprocal scaling overflows, returns an error wrapping
+// ErrNotFinite rather than a silent non-finite estimate. References: Rauch, Tung
+// and Striebel 1965; Anderson and Moore 1979; Shumway and Stoffer 1982 for the
+// lag-one covariance.
 func (m Model) Smooth(zs []Vector, us []Vector) (SmoothResult, error) {
 	fs, err := m.runFilter(zs, us)
 	if err != nil {

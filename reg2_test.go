@@ -125,3 +125,28 @@ func TestInvertPredictedOffAxisSingular(t *testing.T) {
 		}
 	}
 }
+
+// TestValidateRejectsNegativeAndZeroVarHoles covers attack R3e: a negative
+// variance, and a zero-variance component with a non-zero covariance, are
+// rejected even next to a much larger block, because the diagonal is judged
+// against its own row and the covariance against the partner's deviation, not
+// against the largest diagonal.
+func TestValidateRejectsNegativeAndZeroVarHoles(t *testing.T) {
+	cases := map[string]Matrix{
+		"negative variance next to 1e10": Diag(1e10, -1),
+		"zero variance with covariance next to 1e10": FromRows(
+			[]float64{1e10, 0, 0},
+			[]float64{0, 0, 1},
+			[]float64{0, 1, 1},
+		),
+	}
+	for name, q := range cases {
+		m := Model{F: Ident(q.Rows()), Q: q, H: Zeros(1, q.Rows()), R: Diag(1), Mu0: make(Vector, q.Rows()), P0: Ident(q.Rows())}
+		m.H.set(0, 0, 1)
+		if err := m.Validate(); err == nil {
+			t.Errorf("%s: accepted an indefinite Q", name)
+		} else if !errorsIsInvalidModel(err) {
+			t.Errorf("%s: wrong error kind: %v", name, err)
+		}
+	}
+}

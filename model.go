@@ -161,16 +161,26 @@ func covProblem(m Matrix, name string, requirePD bool) error {
 		}
 		return nil
 	}
-	// A positive-(semi)definite matrix has a non-negative diagonal. A component
-	// has usable variance when 1/sqrt of its diagonal is finite; a zero or
-	// subnormal diagonal is a deterministic (zero-variance) direction, which a
-	// positive-definite matrix cannot have. The per-component factor 1/sqrt(d_i)
-	// scales the correlation and the symmetry test without ever forming the
-	// product d_i*d_j, which would overflow or underflow at extreme scales.
+	// A positive-(semi)definite matrix has a non-negative diagonal, each entry
+	// judged against its own row (a negative variance is invalid however small it
+	// is next to a larger component). A component has usable variance when 1/sqrt
+	// of its diagonal is finite; a zero or subnormal diagonal is a deterministic
+	// (zero-variance) direction, which a positive-definite matrix cannot have.
+	// The per-component factor 1/sqrt(d_i) scales the correlation and the symmetry
+	// test without ever forming d_i*d_j, which would overflow or underflow at
+	// extreme scales.
 	scale := make([]float64, n)
+	rowScale := make([]float64, n)
+	for i := 0; i < n; i++ {
+		for j := 0; j < n; j++ {
+			if a := math.Abs(m.At(i, j)); a > rowScale[i] {
+				rowScale[i] = a
+			}
+		}
+	}
 	for i := 0; i < n; i++ {
 		d := m.At(i, i)
-		if d < -psdTol*dmax {
+		if d < -psdTol*rowScale[i] {
 			return fmt.Errorf("%w: %s has a negative diagonal entry, not positive semidefinite", ErrInvalidModel, name)
 		}
 		if s := 1 / math.Sqrt(d); d > 0 && !math.IsInf(s, 0) && !math.IsNaN(s) {
@@ -179,8 +189,10 @@ func covProblem(m Matrix, name string, requirePD bool) error {
 			return fmt.Errorf("%w: %s is not positive definite (a diagonal entry is zero)", ErrInvalidModel, name)
 		}
 	}
-	// Build the correlation matrix and check symmetry on its scale. A row whose
-	// variance is zero must have zero covariance, or the matrix is not PSD.
+	// Build the correlation matrix and check symmetry on its scale. A component
+	// whose variance is zero must have zero covariance, judged against the other
+	// component's standard deviation sqrt(d_j), not against the largest diagonal,
+	// or a covariance tied to a tiny variance slips next to a large block.
 	c := Ident(n)
 	for i := 0; i < n; i++ {
 		for j := i + 1; j < n; j++ {
@@ -192,10 +204,19 @@ func covProblem(m Matrix, name string, requirePD bool) error {
 				c.set(i, j, r)
 				c.set(j, i, r)
 			} else {
-				if math.Abs(m.At(i, j)-m.At(j, i)) > symTol*dmax {
+				ref := rowScale[i]
+				if rowScale[j] > ref {
+					ref = rowScale[j]
+				}
+				if scale[j] != 0 {
+					ref = 1 / scale[j]
+				} else if scale[i] != 0 {
+					ref = 1 / scale[i]
+				}
+				if math.Abs(m.At(i, j)-m.At(j, i)) > symTol*ref {
 					return fmt.Errorf("%w: %s is not symmetric", ErrInvalidModel, name)
 				}
-				if math.Abs(m.At(i, j)) > psdTol*dmax || math.Abs(m.At(j, i)) > psdTol*dmax {
+				if math.Abs(m.At(i, j)) > symTol*ref || math.Abs(m.At(j, i)) > symTol*ref {
 					return fmt.Errorf("%w: %s has a zero-variance component with non-zero covariance, not positive semidefinite", ErrInvalidModel, name)
 				}
 			}
